@@ -1,65 +1,51 @@
-import Image from "next/image";
+import { prisma } from "@/lib/prisma";
+import { WorkshopCard } from "@/components/WorkshopCard";
 
-export default function Home() {
+// On force le rendu dynamique : à chaque visite, Next.js relit la DB.
+// Sans ça, en prod Next pourrait servir une version statique mise en cache au build.
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const workshops = await prisma.workshop.findMany({
+    orderBy: { createdAt: "desc" },
+  });
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <main className="min-h-screen bg-stone-50">
+      <section className="border-b border-stone-200 bg-white">
+        <div className="mx-auto max-w-6xl px-6 py-16">
+          <h1 className="text-4xl font-bold tracking-tight text-stone-900 sm:text-5xl">
+            Annuaire des Menuisiers de Dakar
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="mt-4 max-w-2xl text-lg text-stone-600">
+            Un répertoire des ateliers de menuiserie de Dakar et de leur
+            savoir-faire. Projet d&apos;étudiant alimenté au fil des visites de
+            terrain.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-6 py-12">
+        <div className="mb-8 flex items-baseline justify-between">
+          <h2 className="text-2xl font-semibold text-stone-900">
+            Tous les ateliers
+          </h2>
+          <span className="text-sm text-stone-500">
+            {workshops.length}{" "}
+            {workshops.length > 1 ? "ateliers" : "atelier"}
+          </span>
         </div>
-      </main>
-    </div>
+
+        {workshops.length === 0 ? (
+          <p className="text-stone-500">Aucun atelier pour le moment.</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {workshops.map((w) => (
+              <WorkshopCard key={w.id} workshop={w} />
+            ))}
+          </div>
+        )}
+      </section>
+    </main>
   );
 }
