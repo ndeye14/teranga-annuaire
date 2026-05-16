@@ -1,16 +1,15 @@
+import Link from "next/link";
+import { getInitials } from "@/lib/utils";
 // Prisma 7 expose les types modèles avec le suffixe `Model`. On alias pour rester
 // lisible : on utilise `Workshop` dans le code, mais on sait que c'est `WorkshopModel`.
 import type { WorkshopModel as Workshop } from "@/generated/prisma/models";
 
-function getInitials(name: string) {
-  const words = name.trim().split(/\s+/);
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
-}
-
 export function WorkshopCard({ workshop }: { workshop: Workshop }) {
   return (
-    <article className="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+    <Link
+      href={`/ateliers/${workshop.slug}`}
+      className="group block overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition-shadow hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600"
+    >
       {workshop.photoUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -29,7 +28,7 @@ export function WorkshopCard({ workshop }: { workshop: Workshop }) {
       <div className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-lg font-semibold text-stone-900">
+            <h3 className="text-lg font-semibold text-stone-900 group-hover:text-amber-900">
               {workshop.name}
             </h3>
             <p className="text-sm text-stone-500">{workshop.ownerName}</p>
@@ -61,6 +60,6 @@ export function WorkshopCard({ workshop }: { workshop: Workshop }) {
           </ul>
         )}
       </div>
-    </article>
+    </Link>
   );
 }

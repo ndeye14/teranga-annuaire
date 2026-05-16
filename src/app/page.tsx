@@ -1,14 +1,29 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { WorkshopCard } from "@/components/WorkshopCard";
 
-// On force le rendu dynamique : à chaque visite, Next.js relit la DB.
-// Sans ça, en prod Next pourrait servir une version statique mise en cache au build.
 export const dynamic = "force-dynamic";
 
-export default async function HomePage() {
-  const workshops = await prisma.workshop.findMany({
-    orderBy: { createdAt: "desc" },
-  });
+type Props = {
+  searchParams: Promise<{ quartier?: string }>;
+};
+
+export default async function HomePage({ searchParams }: Props) {
+  const { quartier } = await searchParams;
+
+  // Deux requêtes en parallèle : la liste des quartiers (pour les filtres) et
+  // la liste d'ateliers (filtrée si un quartier est sélectionné).
+  const [neighborhoods, workshops] = await Promise.all([
+    prisma.workshop.findMany({
+      select: { neighborhood: true },
+      distinct: ["neighborhood"],
+      orderBy: { neighborhood: "asc" },
+    }),
+    prisma.workshop.findMany({
+      where: quartier ? { neighborhood: quartier } : undefined,
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
 
   return (
     <main className="min-h-screen bg-stone-50">
@@ -26,9 +41,24 @@ export default async function HomePage() {
       </section>
 
       <section className="mx-auto max-w-6xl px-6 py-12">
+        <div className="mb-8 flex flex-wrap items-center gap-2">
+          <span className="mr-2 text-sm font-semibold text-stone-600">
+            Quartier :
+          </span>
+          <FilterChip href="/" active={!quartier} label="Tous" />
+          {neighborhoods.map(({ neighborhood }) => (
+            <FilterChip
+              key={neighborhood}
+              href={`/?quartier=${encodeURIComponent(neighborhood)}`}
+              active={quartier === neighborhood}
+              label={neighborhood}
+            />
+          ))}
+        </div>
+
         <div className="mb-8 flex items-baseline justify-between">
           <h2 className="text-2xl font-semibold text-stone-900">
-            Tous les ateliers
+            {quartier ? `Ateliers à ${quartier}` : "Tous les ateliers"}
           </h2>
           <span className="text-sm text-stone-500">
             {workshops.length}{" "}
@@ -37,7 +67,14 @@ export default async function HomePage() {
         </div>
 
         {workshops.length === 0 ? (
-          <p className="text-stone-500">Aucun atelier pour le moment.</p>
+          <p className="rounded-lg border border-dashed border-stone-300 bg-white p-8 text-center text-stone-500">
+            Aucun atelier trouvé{quartier ? ` à ${quartier}` : ""}.{" "}
+            {quartier && (
+              <Link href="/" className="font-medium text-amber-700 underline">
+                Voir tous les ateliers
+              </Link>
+            )}
+          </p>
         ) : (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {workshops.map((w) => (
@@ -47,5 +84,26 @@ export default async function HomePage() {
         )}
       </section>
     </main>
+  );
+}
+
+function FilterChip({
+  href,
+  active,
+  label,
+}: {
+  href: string;
+  active: boolean;
+  label: string;
+}) {
+  const base =
+    "rounded-full px-4 py-1.5 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600";
+  const variant = active
+    ? "bg-amber-600 text-white hover:bg-amber-700"
+    : "border border-stone-300 bg-white text-stone-700 hover:bg-stone-100";
+  return (
+    <Link href={href} className={`${base} ${variant}`}>
+      {label}
+    </Link>
   );
 }
