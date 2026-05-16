@@ -181,6 +181,12 @@ Les caractères spéciaux dans le password doivent être **URL-encodés** dans l
 - `/` → `%2F`
 - etc.
 
+### Storage : bucket public + `service_role` key
+- Créer le bucket dans **Storage** du dashboard Supabase, cocher **Public bucket** (sinon les URLs publiques renvoient 401).
+- Récupérer dans **Project Settings → API** : la **Project URL** et la clé **`service_role`** (PAS l'`anon`).
+- La `service_role` est un secret admin → jamais dans le bundle client, jamais committé. Sur Vercel : marquer **Sensitive** à l'ajout.
+- ⚠️ Ajouter les env vars Vercel **avant** de push du code qui importe le client Supabase (sinon le build échoue à l'évaluation du module).
+
 ---
 
 ## Concepts Prisma appris
@@ -249,6 +255,23 @@ Vus en session 2 : routes dynamiques, filtres URL-driven, mutations via Server A
 | **Server Actions vs Zustand** | Pas concurrents — complémentaires. Zustand = état temporaire client (config UI, panier, filtres clients). Server Actions = persistance DB. Pattern : Zustand pour interagir localement → Server Action pour persister. |
 | **Heuristique de choix** | « Persisté » → Server Action. « Temporaire utilisateur » → Zustand. « Endpoint externe / mobile / webhook » → API REST. |
 
+### Upload de fichiers via Supabase Storage — Bloc 4
+
+| Concept | Résumé |
+|---|---|
+| **DB ≠ stockage fichier** | Postgres pour le texte structuré, Storage pour les binaires (photos, PDFs). En DB on ne stocke que l'URL du fichier. |
+| **Supabase Storage** | Service S3-compatible inclus dans Supabase. 1 GB de stockage + 2 GB de bandwidth/mois en free tier. SDK officiel : `@supabase/supabase-js`. |
+| **Bucket public** | Marqué "Public" à la création → URLs accessibles sans clé. Modèle privé (RLS) existe aussi : signed URLs nécessaires, plus complexe. |
+| **`anon` vs `service_role`** | `anon` = clé publique côté client, respecte la RLS. `service_role` = admin total, bypass RLS, **serveur uniquement**. Si tu fuites `service_role` sur GitHub, c'est game over. |
+| **Client singleton serveur-only** | Même pattern que `prisma.ts` : `globalThis` pour survivre au HMR. Auth désactivée (`persistSession: false`) car c'est un client serveur, pas de session utilisateur. |
+| **`File` dans `FormData`** | `formData.get("photoFile")` retourne `File \| null`. Caster en `File`, vérifier `.size > 0` (sinon c'est un champ vide). Les `<form action={serverAction}>` gèrent automatiquement le multipart. |
+| **`bodySizeLimit`** | Server Actions limitées à **1 MB par défaut**. Pour uploader des photos, bumper dans `next.config.ts` via `experimental.serverActions.bodySizeLimit: "6mb"`. Redémarrage du dev server requis. |
+| **`upsert: true` à l'upload** | Écrase le fichier si le path existe déjà → pratique pour les updates "même atelier ↔ même path = `${slug}.${ext}`". |
+| **`getPublicUrl()` synchrone** | Pure construction d'URL côté client : `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`. Aucun appel réseau, ne vérifie pas que le fichier existe. |
+| **Helper privé dans `"use server"`** | Une fonction **non exportée** dans un fichier `"use server"` reste une fonction module normale, pas une Server Action. Idéal pour les helpers internes (genre `uploadPhoto`). Seuls les `export` deviennent des actions. |
+| **Spread conditionnel pour updates partiels** | `...(value !== undefined && { field: value })` permet d'omettre un champ du `data` Prisma. Prisma laisse alors la valeur existante intacte. Astuce critique quand on veut "ne pas toucher si pas fourni" (vs. mettre `null` qui effacerait). |
+| **Ordre d'opérations create** | Upload **avant** `prisma.create`. Si l'upload pète, on n'a pas créé un atelier qui pointe vers une photo manquante. En update inverse : on peut faire upload→update ou update→upload, ça compense. |
+
 ---
 
 ## Structure du projet (à ce stade)
@@ -278,8 +301,10 @@ teranga-annuaire/
 │   ├── generated/prisma/                   ← Client Prisma 7 (gitignored)
 │   └── lib/
 │       ├── prisma.ts                       ← Singleton PrismaClient + adapter pg
+│       ├── supabase.ts                     ← Singleton Supabase (service_role, server-only)
 │       └── utils.ts                        ← getInitials, slugify
-├── .env                                    ← DATABASE_URL + DIRECT_URL (gitignored)
+├── next.config.ts                          ← bodySizeLimit 6mb pour Server Actions
+├── .env                                    ← DATABASE_URL + DIRECT_URL + SUPABASE_* (gitignored)
 ├── NOTES.md                                ← ce fichier
 └── ...
 ```
