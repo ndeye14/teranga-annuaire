@@ -55,14 +55,38 @@ export function WorkshopForm({
         containerClass="sm:col-span-2"
         defaultValue={workshop?.specialties.join(", ")}
       />
-      <Field
-        label="Photo (URL)"
-        name="photoUrl"
-        type="url"
-        placeholder="https://..."
-        containerClass="sm:col-span-2"
-        defaultValue={workshop?.photoUrl ?? ""}
-      />
+
+      {workshop?.photoUrl && (
+        <div className="sm:col-span-2">
+          <p className="text-sm font-medium text-stone-700">Photo actuelle</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={workshop.photoUrl}
+            alt={workshop.name}
+            className="mt-1 h-40 w-full rounded-lg border border-stone-200 object-cover sm:w-auto"
+          />
+          <p className="mt-1 text-xs text-stone-500">
+            Choisis un fichier ci-dessous pour la remplacer (sinon elle reste).
+          </p>
+        </div>
+      )}
+
+      <div className="sm:col-span-2">
+        <label
+          className="block text-sm font-medium text-stone-700"
+          htmlFor="photoFile"
+        >
+          Photo de l&apos;atelier {workshop ? "(optionnel)" : "(optionnel, JPG/PNG, max 5 MB)"}
+        </label>
+        <input
+          id="photoFile"
+          name="photoFile"
+          type="file"
+          accept="image/*"
+          className="mt-1 block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-stone-700 hover:file:bg-stone-200"
+        />
+      </div>
+
       <div className="sm:col-span-2">
         <label
           className="block text-sm font-medium text-stone-700"

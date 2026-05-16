@@ -4,22 +4,57 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/utils";
+import { supabase, STORAGE_BUCKET } from "@/lib/supabase";
+
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/**
+ * Upload une photo dans le bucket Supabase Storage `workshop-photos`.
+ * Path : `{slug}.{ext}`. Si une photo existait déjà au même path, elle est écrasée
+ * (upsert: true).
+ * Helper interne (pas exporté → reste un module function, pas une Server Action).
+ */
+async function uploadPhoto(file: File, slug: string): Promise<string> {
+  if (file.size > MAX_PHOTO_BYTES) {
+    throw new Error("Photo trop volumineuse (max 5 MB)");
+  }
+
+  // Récupère l'extension depuis le nom du fichier d'origine
+  const dot = file.name.lastIndexOf(".");
+  const ext = (dot >= 0 ? file.name.slice(dot + 1) : "jpg").toLowerCase();
+  const path = `${slug}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .upload(path, file, {
+      contentType: file.type || "image/jpeg",
+      upsert: true, // écrase si même path existe (cas update)
+    });
+  if (uploadError) {
+    throw new Error("Upload échoué : " + uploadError.message);
+  }
+
+  // URL publique — pure construction côté client, pas un appel réseau
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+
+  return publicUrl;
+}
 
 /**
  * Server Action appelée par le formulaire `/admin`.
  * Lit les champs du FormData, valide, crée l'atelier, redirige vers la home.
  */
 export async function createWorkshop(formData: FormData) {
-  // Lecture des champs — toujours `String(... ?? "")` pour gérer null/File
   const name = String(formData.get("name") ?? "").trim();
   const ownerName = String(formData.get("ownerName") ?? "").trim();
   const neighborhood = String(formData.get("neighborhood") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
-  const photoUrlRaw = String(formData.get("photoUrl") ?? "").trim();
   const specialtiesRaw = String(formData.get("specialties") ?? "").trim();
   const yearsExperience = Number(formData.get("yearsExperience"));
+  const photoFile = formData.get("photoFile") as File | null;
 
-  // Validation côté serveur (HTML5 required est utile en UX mais peut être bypass)
   if (!name || !ownerName || !neighborhood || !description) {
     redirect(
       `/admin?error=${encodeURIComponent("Tous les champs marqués * sont requis")}`
@@ -40,8 +75,6 @@ export async function createWorkshop(formData: FormData) {
 
   const slug = slugify(name);
 
-  // Garde-fou : unicité du slug. On pourrait laisser Prisma lever l'erreur P2002
-  // et la catcher, mais une vérification explicite donne un message plus clair.
   const existing = await prisma.workshop.findUnique({ where: { slug } });
   if (existing) {
     redirect(
@@ -49,6 +82,18 @@ export async function createWorkshop(formData: FormData) {
         `Un atelier nommé "${name}" existe déjà (slug : ${slug})`
       )}`
     );
+  }
+
+  // Upload de la photo avant la création en DB. Si ça pète, on redirige avec
+  // l'erreur — pas d'atelier créé sans sa photo qu'on aurait promise.
+  let photoUrl: string | null = null;
+  if (photoFile && photoFile.size > 0) {
+    try {
+      photoUrl = await uploadPhoto(photoFile, slug);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Upload échoué";
+      redirect(`/admin?error=${encodeURIComponent(msg)}`);
+    }
   }
 
   await prisma.workshop.create({
@@ -60,13 +105,11 @@ export async function createWorkshop(formData: FormData) {
       yearsExperience,
       specialties,
       description,
-      photoUrl: photoUrlRaw || null,
+      photoUrl,
     },
   });
 
-  // Invalide le cache de la home pour que le nouvel atelier apparaisse.
   revalidatePath("/");
-  // Redirige vers la home : l'utilisateur voit sa création immédiatement.
   redirect("/");
 }
 
@@ -80,9 +123,9 @@ export async function updateWorkshop(id: string, formData: FormData) {
   const ownerName = String(formData.get("ownerName") ?? "").trim();
   const neighborhood = String(formData.get("neighborhood") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
-  const photoUrlRaw = String(formData.get("photoUrl") ?? "").trim();
   const specialtiesRaw = String(formData.get("specialties") ?? "").trim();
   const yearsExperience = Number(formData.get("yearsExperience"));
+  const photoFile = formData.get("photoFile") as File | null;
 
   if (!name || !ownerName || !neighborhood || !description) {
     redirect(
@@ -102,7 +145,27 @@ export async function updateWorkshop(id: string, formData: FormData) {
         .filter(Boolean)
     : [];
 
-  // prisma.update throw si aucun record ne correspond — c'est suffisant comme garde-fou
+  // On a besoin du slug pour nommer le fichier uploadé (slug est immuable)
+  const existing = await prisma.workshop.findUnique({
+    where: { id },
+    select: { slug: true },
+  });
+  if (!existing) {
+    redirect(`/admin?error=${encodeURIComponent("Atelier introuvable")}`);
+  }
+
+  // Upload optionnel : si pas de fichier, on garde l'ancien photoUrl tel quel
+  // (en ne mettant pas la clé dans `data`, Prisma ne touche pas au champ).
+  let newPhotoUrl: string | undefined = undefined;
+  if (photoFile && photoFile.size > 0) {
+    try {
+      newPhotoUrl = await uploadPhoto(photoFile, existing.slug);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Upload échoué";
+      redirect(`/admin?error=${encodeURIComponent(msg)}`);
+    }
+  }
+
   const updated = await prisma.workshop.update({
     where: { id },
     data: {
@@ -112,12 +175,11 @@ export async function updateWorkshop(id: string, formData: FormData) {
       yearsExperience,
       specialties,
       description,
-      photoUrl: photoUrlRaw || null,
+      // photoUrl n'est inclus que si on a uploadé un nouveau fichier
+      ...(newPhotoUrl !== undefined && { photoUrl: newPhotoUrl }),
     },
   });
 
-  // Trois revalidations ciblées : home, page détail, admin.
-  // Alternative paresseuse : revalidatePath("/", "layout") — invalide TOUTES les routes.
   revalidatePath("/");
   revalidatePath(`/ateliers/${updated.slug}`);
   revalidatePath("/admin");
